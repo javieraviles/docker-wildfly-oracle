@@ -1,0 +1,58 @@
+batch
+
+set DB_HOST=${DB_HOST}
+set DB_PORT=${DB_PORT}
+set DB_PASSWORD=${DB_PASSWORD}
+set BASIC_AUTH_USER=${BASIC_AUTH_USER}
+set BASIC_AUTH_PASSWORD=${BASIC_AUTH_PASSWORD}
+
+
+#SETTING UP DATASOURCE
+
+#Create credential store
+/subsystem=elytron/credential-store=pw_store:add(location="credentials/csstore.jceks", relative-to=jboss.server.data.dir, credential-reference={clear-text=passwords_store},create=true)
+#Create DB password in the store
+/subsystem=elytron/credential-store=pw_store:add-alias(alias=oracle, secret-value=$DB_PASSWORD)
+#Create the jboss module for oracle
+module add --name=com.oracle --resources=/opt/jboss/wildfly/ojdbc7.jar --dependencies=javax.api,javax.transaction.api
+#Add oracle driver
+/subsystem=datasources/jdbc-driver=oracle:add(driver-name="oracle",driver-module-name="com.oracle",driver-class-name=oracle.jdbc.driver.OracleDriver)
+#Create Oracle datasource
+data-source add --jndi-name=java:jboss/datasources/OracleDS --name=OraclePool --elytron-enabled=true --connection-url=jdbc:oracle:thin:@$DB_HOST:$DB_PORT:xe --driver-name=oracle --user-name=DOCKERWILDFLY --credential-reference={store=pw_store, alias=oracle}
+
+
+
+#SETTING UP BASIC AUTH
+
+#Create a properties realm out of user and roles property files
+#Uncomment next line in case want to create user/roles out of property files, then comment 
+#/subsystem=elytron/properties-realm=propRealm:add(groups-attribute=groups,groups-properties={path=roles.properties,relative-to=jboss.server.config.dir},users-properties={path=users.properties,relative-to=jboss.server.config.dir,plain-text=true})
+
+#Create a filesystem realm, so we can create user directly with the CLI instead of property files and the values can come from the cli.properties file or env variables
+#Comment next 4 lines in case you want to use a properties realm
+/subsystem=elytron/filesystem-realm=propRealm:add(path=fs-realm-users,relative-to=jboss.server.config.dir)
+#Then add user and role from CLI to the realm
+/subsystem=elytron/filesystem-realm=propRealm:add-identity(identity=$BASIC_AUTH_USER)
+/subsystem=elytron/filesystem-realm=propRealm:set-password(identity=$BASIC_AUTH_USER, clear={password=$BASIC_AUTH_PASSWORD})
+/subsystem=elytron/filesystem-realm=propRealm:add-identity-attribute(identity=$BASIC_AUTH_USER, name=Roles, value=["Technical"])
+
+#Create a role-decoder (not needed for properties-realm, would just use default role-decoder=groups-to-roles)
+/subsystem=elytron/simple-role-decoder=from-roles-attribute:add(attribute=Roles)
+#Create the security domain, associate with the filesystem realm and the role-decoder(this one for filesystem-ream)
+/subsystem=elytron/security-domain=exampleSD:add(realms=[{realm=propRealm,role-decoder=from-roles-attribute}],default-realm=propRealm,permission-mapper=default-permission-mapper)
+#Create the security domain, associated with the realm and make it default (uncomment for peroperties-realm)
+#/subsystem=elytron/security-domain=exampleSD:add(realms=[{realm=propRealm,role-decoder=groups-to-roles}],default-realm=propRealm,permission-mapper=default-permission-mapper)
+
+# NOTE: users could even be added directly using add-user.sh from wildfly, have a look at Dockerfile (line 45)
+
+#This part would be common for both realm types
+#Create the HTTP authentication factory for the security domain, with mechanism BASIC auth
+/subsystem=elytron/http-authentication-factory=van-http-auth:add(http-server-mechanism-factory=global,security-domain=exampleSD,mechanism-configurations=[{mechanism-name=BASIC,mechanism-realm-configurations=[{realm-name=vanApplicationDomain}]}])
+#Now create the application security domain for undertow, associated with the HTTP auth factory
+/subsystem=undertow/application-security-domain=vanApplicationDomain:add(http-authentication-factory=van-http-auth)
+#And create the application security domain for EJBs, associated with the security domain
+/subsystem=ejb3/application-security-domain=vanApplicationDomain:add(security-domain=exampleSD)
+
+
+#Execute the batch
+run-batch

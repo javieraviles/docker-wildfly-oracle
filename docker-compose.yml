@@ -1,0 +1,41 @@
+version: '3.1'
+
+services:
+  db:
+    image: oracle-xe
+    ports:
+      - 1521:1521
+    volumes:
+      - dbadmin:/u01/app/oracle/admin
+      - dbdiag:/u01/app/oracle/diag
+      - dbrecovery:/u01/app/oracle/fast_recovery_area
+      - dbdata:/u01/app/oracle/oradata
+      - dboradiag:/u01/app/oracle/oradiag_oracle
+  wildfly:
+    image: wildfly
+    depends_on: 
+      - db
+    ports:
+      # 8080 where application is deployed, 9990 for admin console and 8787 to enable remote debugging
+      - 8080:8080
+      - 9990:9990
+      - 8787:8787
+    command: /opt/jboss/wildfly/bin/standalone.sh -b 0.0.0.0 -bmanagement 0.0.0.0 --debug
+    volumes:
+      # This two volumes will map your your both deployments and logs:
+      #
+      # c/user/your-user/projects/docker-wildfly-oracle map to deployments,
+      # so the war file can be copied in this directory and automatically deployed 
+      # (the idea is your IDE target dir is here and you don't need to do anything to deploy, 
+      # just build and will be deployed into docker)
+      # 
+      # Second directory will be the same + /logs, mapped to server logs inside docker so
+      # can be accessed from outside
+      - ~/projects/docker-wildfly-oracle:/opt/jboss/wildfly/standalone/deployments/:rw
+      - ~/projects/docker-wildfly-oracle/logs:/opt/jboss/wildfly/standalone/log/:rw
+volumes:
+  dbadmin:
+  dbdiag:
+  dbrecovery:
+  dbdata:
+  dboradiag:
